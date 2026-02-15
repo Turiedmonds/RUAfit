@@ -169,6 +169,12 @@ async function main() {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register(`${getBasePath()}service-worker.js`).catch(() => {});
+
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'SERVICE_WORKER_UPDATED') {
+        window.location.reload();
+      }
+    });
   });
 }
 

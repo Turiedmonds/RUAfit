@@ -1,6 +1,7 @@
 const CACHE_NAME = 'ruafit-static-v2';
 const ASSET_CACHE = 'ruafit-assets-v2';
 const BASE_PATH = new URL(self.registration.scope).pathname;
+const RELOAD_MESSAGE_TYPE = 'SERVICE_WORKER_UPDATED';
 
 const CORE_ASSETS = [
   `${BASE_PATH}`,
@@ -26,15 +27,39 @@ const CORE_ASSETS = [
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
-  self.skipWaiting();
+  event.waitUntil(
+    (async () => {
+      const cache = await caches.open(CACHE_NAME);
+      await cache.addAll(CORE_ASSETS);
+      await self.skipWaiting();
+    })()
+  );
 });
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => ![CACHE_NAME, ASSET_CACHE].includes(k)).map((k) => caches.delete(k))))
+    (async () => {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter((k) => ![CACHE_NAME, ASSET_CACHE].includes(k)).map((k) => caches.delete(k)));
+
+      const coreCache = await caches.open(CACHE_NAME);
+      await Promise.all(
+        CORE_ASSETS.map(async (asset) => {
+          try {
+            const response = await fetch(new Request(asset, { cache: 'reload' }));
+            if (response.ok) await coreCache.put(asset, response);
+          } catch {
+            // Keep the previously cached resource when a network refresh fails.
+          }
+        })
+      );
+
+      await self.clients.claim();
+
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      clients.forEach((client) => client.postMessage({ type: RELOAD_MESSAGE_TYPE }));
+    })()
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
