@@ -24,6 +24,99 @@ async function getJson(path) {
   return response.json();
 }
 
+function sportLookupKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function dedupeTeamNames(teams) {
+  if (!Array.isArray(teams)) return [];
+
+  const seen = new Set();
+  const output = [];
+
+  teams.forEach((team) => {
+    if (typeof team !== 'string') return;
+    const cleaned = team.trim();
+    if (!cleaned) return;
+
+    const key = cleaned.toLocaleLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    output.push(cleaned);
+  });
+
+  return output;
+}
+
+function shuffleTeams(teams) {
+  const shuffled = [...teams];
+  for (let index = shuffled.length - 1; index > 0; index -= 1) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [shuffled[index], shuffled[randomIndex]] = [shuffled[randomIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function pairTeams(teams) {
+  const pairs = [];
+  for (let index = 0; index < teams.length; index += 2) {
+    pairs.push({ home: teams[index], away: teams[index + 1] || 'BYE' });
+  }
+  return pairs;
+}
+
+function sanitizeSportEntry(sport) {
+  if (!sport || typeof sport !== 'object') return null;
+
+  const code = typeof sport.code === 'string' ? sport.code.trim() : '';
+  if (!code) return null;
+
+  return {
+    code,
+    location: typeof sport.location === 'string' ? sport.location : '',
+    drawUrl: typeof sport.drawUrl === 'string' ? sport.drawUrl : '',
+    notes: typeof sport.notes === 'string' ? sport.notes : ''
+  };
+}
+
+function mergeSports(baseSports, userSports, teamMap, drawMap) {
+  const merged = [];
+  const keyIndex = new Map();
+
+  baseSports.forEach((sport) => {
+    const cleanSport = sanitizeSportEntry(sport);
+    if (!cleanSport) return;
+
+    const lookupKey = sportLookupKey(cleanSport.code);
+    keyIndex.set(lookupKey, true);
+    merged.push({
+      ...cleanSport,
+      lookupKey,
+      teams: dedupeTeamNames(teamMap[lookupKey]),
+      draw: Array.isArray(drawMap[lookupKey]) ? drawMap[lookupKey] : []
+    });
+  });
+
+  userSports.forEach((sport) => {
+    const cleanSport = sanitizeSportEntry(sport);
+    if (!cleanSport) return;
+
+    const lookupKey = sportLookupKey(cleanSport.code);
+    if (!lookupKey || keyIndex.has(lookupKey)) return;
+
+    keyIndex.set(lookupKey, true);
+    merged.push({
+      ...cleanSport,
+      lookupKey,
+      teams: dedupeTeamNames(teamMap[lookupKey]),
+      draw: Array.isArray(drawMap[lookupKey]) ? drawMap[lookupKey] : []
+    });
+  });
+
+  return merged;
+}
+
 function renderShell(eventData) {
   const links = navLinks();
   const linksHtml = links.map((link) => `<a href="${link.href}">${link.label}</a>`).join('');
@@ -80,304 +173,320 @@ function renderProgramme(programme) {
   `).join('')}`;
 }
 
-function renderSports(sports) {
-  app.innerHTML = `<h1>Sports</h1>${sports.map((sport) => {
-    const teams = Array.isArray(sport.teams) ? sport.teams : [];
-    const teamsHtml = teams.length === 0
-      ? ''
-      : `<h3>Teams</h3><ul>${teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
+function renderSports({ sports, statusMessage = '' }) {
+  const optionsHtml = sports.map((sport) => `
+    <option value="${escapeHtml(sport.lookupKey)}">${escapeHtml(sport.code)}</option>
+  `).join('');
 
-    return `
-      <section class="card">
-        <h2>${escapeHtml(sport.code)}</h2>
-        <p>Location: ${escapeHtml(sport.location)}</p>
-        <p>${escapeHtml(sport.notes)}</p>
-        <a href="${escapeHtml(sport.drawUrl)}" target="_blank" rel="noreferrer">View draw</a>
-        ${teamsHtml}
-      </section>
-    `;
-  }).join('')}`;
+  app.innerHTML = `
+    <h1>Sports</h1>
+    <section class="card">
+      <h2>Manage Teams</h2>
+      <p class="small">Paste one team per line. You can select an existing sport or type a new one.</p>
+      <label for="teamSportSelect">Choose sport</label>
+      <select id="teamSportSelect" class="field-input">
+        <option value="">Select a sport</option>
+        ${optionsHtml}
+      </select>
+      <label for="newSportInput">Or type a new sport</label>
+      <input id="newSportInput" class="field-input" type="text" placeholder="Basketball" />
+      <label for="pasteTeamsInput">Paste team names (one team per line)</label>
+      <textarea id="pasteTeamsInput" class="paste-textarea" rows="8" placeholder="Team A&#10;Team B"></textarea>
+      <fieldset class="option-group">
+        <legend>Import behavior</legend>
+        <label><input type="radio" name="importMode" value="replace" checked /> Replace teams for that sport</label>
+        <label><input type="radio" name="importMode" value="append" /> Add/append teams for that sport</label>
+      </fieldset>
+      <div class="paste-actions">
+        <button type="button" id="applyTeamImportBtn" class="button">Import / Apply</button>
+      </div>
+      <div class="manual-team-row">
+        <input id="singleTeamInput" class="field-input" type="text" placeholder="Add one team" />
+        <button type="button" id="addSingleTeamBtn" class="button">Add Team</button>
+      </div>
+      <div class="paste-actions">
+        <button type="button" id="clearSelectedSportBtn" class="button">Clear teams for selected sport</button>
+        <button type="button" id="clearAllSportsDataBtn" class="button">Clear ALL imported teams + user-created sports</button>
+      </div>
+      <p id="sportsManageStatus" class="small" aria-live="polite">${escapeHtml(statusMessage)}</p>
+    </section>
+    ${sports.map((sport) => {
+      const teamsHtml = sport.teams.length === 0
+        ? '<p class="small">No teams yet.</p>'
+        : `<h3>Teams</h3><ul>${sport.teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
+      const drawHtml = sport.draw.length === 0
+        ? '<p class="small">No draw generated.</p>'
+        : `<h3>Draw</h3><ul>${sport.draw.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+      const drawLink = sport.drawUrl
+        ? `<a href="${escapeHtml(sport.drawUrl)}" target="_blank" rel="noreferrer">View draw link</a>`
+        : '';
+
+      return `
+        <section class="card">
+          <h2>${escapeHtml(sport.code)}</h2>
+          <p>Location: ${escapeHtml(sport.location || '')}</p>
+          <p>${escapeHtml(sport.notes || '')}</p>
+          ${drawLink}
+          ${teamsHtml}
+          <div class="draw-controls">
+            <label for="drawMode-${escapeHtml(sport.lookupKey)}">Draw mode</label>
+            <select id="drawMode-${escapeHtml(sport.lookupKey)}" class="field-input draw-mode" data-sport-key="${escapeHtml(sport.lookupKey)}">
+              <option value="listed">As listed</option>
+              <option value="random">Random</option>
+            </select>
+            <button type="button" class="button generate-draw-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Generate Draw</button>
+            <button type="button" class="button clear-draw-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Clear Draw</button>
+            <button type="button" class="button clear-sport-teams-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Clear Teams</button>
+          </div>
+          ${drawHtml}
+        </section>
+      `;
+    }).join('')}
+  `;
 }
 
-function normalizeTeams(teams) {
-  if (!Array.isArray(teams)) return [];
+function setupSportsManager(baseSports) {
+  let statusMessage = '';
 
-  const seen = new Set();
-  const normalized = [];
+  const getState = () => {
+    const importedSportTeams = storage.getImportedSportTeams();
+    const normalizedTeams = {};
+    Object.entries(importedSportTeams).forEach(([sportCode, teams]) => {
+      normalizedTeams[sportLookupKey(sportCode)] = dedupeTeamNames(teams);
+    });
 
-  teams.forEach((team) => {
-    if (typeof team !== 'string') return;
-    const cleaned = team.trim();
-    if (!cleaned) return;
+    const sportDraws = storage.getSportDraws();
+    const normalizedDraws = {};
+    Object.entries(sportDraws || {}).forEach(([sportCode, draw]) => {
+      if (Array.isArray(draw)) normalizedDraws[sportLookupKey(sportCode)] = draw;
+    });
 
-    const key = cleaned.toLowerCase();
-    if (seen.has(key)) return;
-
-    seen.add(key);
-    normalized.push(cleaned);
-  });
-
-  return normalized;
-}
-
-function applyTeamOverrides(sports, teamOverrides) {
-  if (!teamOverrides || typeof teamOverrides !== 'object') return sports;
-
-  return sports.map((sport) => {
-    if (!Object.prototype.hasOwnProperty.call(teamOverrides, sport.code)) return sport;
+    const userSports = storage.getUserSports()
+      .map((sport) => sanitizeSportEntry(sport))
+      .filter(Boolean);
 
     return {
-      ...sport,
-      teams: normalizeTeams(teamOverrides[sport.code])
+      importedSportTeams: normalizedTeams,
+      sportDraws: normalizedDraws,
+      userSports,
+      sports: mergeSports(baseSports, userSports, normalizedTeams, normalizedDraws)
     };
-  });
-}
-
-function parseTeamImport(rawText) {
-  const parsed = JSON.parse(rawText);
-  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-    throw new Error('Invalid format. Use { "Sport Code": ["Team A", "Team B"] }.');
-  }
-
-  const normalized = {};
-  Object.entries(parsed).forEach(([sportCode, teams]) => {
-    if (typeof sportCode !== 'string') return;
-    const code = sportCode.trim();
-    if (!code) return;
-    normalized[code] = normalizeTeams(teams);
-  });
-
-  return normalized;
-}
-
-function parsePastedTeams(rawText) {
-  const groupedBySport = {};
-  const unparsedLines = [];
-  const lines = String(rawText || '').split(/\r?\n/);
-  let currentHeader = '';
-
-  const addTeam = (sportLabel, teamName) => {
-    if (!groupedBySport[sportLabel]) groupedBySport[sportLabel] = [];
-    groupedBySport[sportLabel].push(teamName);
   };
 
-  const parseSeparatedLine = (line) => {
-    const separators = [',', '\t', ' - '];
-    for (const separator of separators) {
-      const separatorIndex = line.indexOf(separator);
-      if (separatorIndex < 0) continue;
+  const saveState = ({ importedSportTeams, userSports, sportDraws }) => {
+    storage.setImportedSportTeams(importedSportTeams);
+    storage.setUserSports(userSports);
+    storage.setSportDraws(sportDraws);
+  };
 
-      const sportLabel = line.slice(0, separatorIndex).trim();
-      const teamName = line.slice(separatorIndex + separator.length).trim();
-      if (!sportLabel || !teamName) return null;
+  const rerender = () => {
+    const state = getState();
+    renderSports({ sports: state.sports, statusMessage });
+    bindEvents();
+  };
 
-      return { sportLabel, teamName };
+  const resolveSportSelection = (state) => {
+    const selectedSportKey = sportLookupKey(document.getElementById('teamSportSelect')?.value);
+    const typedSport = document.getElementById('newSportInput')?.value || '';
+    const typedSportLabel = typedSport.trim();
+    const typedSportKey = sportLookupKey(typedSportLabel);
+
+    if (typedSportLabel) {
+      const existingSport = state.sports.find((sport) => sport.lookupKey === typedSportKey);
+      if (existingSport) {
+        return { lookupKey: typedSportKey, displayLabel: existingSport.code, createdNewSport: false };
+      }
+
+      const nextUserSports = [...state.userSports, { code: typedSportLabel, location: '', drawUrl: '', notes: '' }];
+      storage.setUserSports(nextUserSports);
+      return { lookupKey: typedSportKey, displayLabel: typedSportLabel, createdNewSport: true };
     }
 
-    return null;
+    if (!selectedSportKey) return null;
+
+    const selectedSport = state.sports.find((sport) => sport.lookupKey === selectedSportKey);
+    if (!selectedSport) return null;
+
+    return { lookupKey: selectedSport.lookupKey, displayLabel: selectedSport.code, createdNewSport: false };
   };
 
-  lines.forEach((rawLine) => {
-    const line = rawLine.trim();
-    if (!line) return;
-
-    if (line.endsWith(':')) {
-      const header = line.slice(0, -1).trim();
-      if (!header) {
-        unparsedLines.push(rawLine);
-        currentHeader = '';
+  const bindEvents = () => {
+    document.getElementById('applyTeamImportBtn')?.addEventListener('click', () => {
+      const state = getState();
+      const sportSelection = resolveSportSelection(state);
+      if (!sportSelection) {
+        statusMessage = 'Choose a sport from the dropdown or type a new sport name first.';
+        rerender();
         return;
       }
-      currentHeader = header;
-      return;
-    }
 
-    const separated = parseSeparatedLine(line);
-    if (separated) {
-      addTeam(separated.sportLabel, separated.teamName);
-      return;
-    }
+      const pasteInput = document.getElementById('pasteTeamsInput');
+      const importMode = document.querySelector('input[name="importMode"]:checked')?.value || 'replace';
+      const rawTeams = String(pasteInput?.value || '').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
 
-    if (currentHeader) {
-      addTeam(currentHeader, line);
-      return;
-    }
+      if (rawTeams.length === 0) {
+        statusMessage = 'No team lines found. Paste at least one team name.';
+        rerender();
+        return;
+      }
 
-    unparsedLines.push(rawLine);
-  });
+      const existingTeams = state.importedSportTeams[sportSelection.lookupKey] || [];
+      const combined = importMode === 'append' ? [...existingTeams, ...rawTeams] : rawTeams;
+      const deduped = dedupeTeamNames(combined);
+      const ignoredCount = combined.length - deduped.length;
 
-  const normalized = {};
-  Object.entries(groupedBySport).forEach(([sportLabel, teams]) => {
-    normalized[sportLabel] = normalizeTeams(teams);
-  });
+      const nextImported = { ...state.importedSportTeams, [sportSelection.lookupKey]: deduped };
+      const nextDraws = { ...state.sportDraws };
+      delete nextDraws[sportSelection.lookupKey];
 
-  return { groupedTeams: normalized, unparsedLines };
-}
-
-function mapImportedTeamsBySportCode(importedMap, sportCodeLookup) {
-  const canonicalMap = {};
-  const matchedCodes = [];
-  const unmatchedKeys = [];
-
-  Object.entries(importedMap).forEach(([sportCode, teams]) => {
-    const canonicalCode = sportCodeLookup.get(sportCode.toLowerCase());
-    if (!canonicalCode) {
-      unmatchedKeys.push(sportCode);
-      return;
-    }
-
-    if (!canonicalMap[canonicalCode]) matchedCodes.push(canonicalCode);
-    canonicalMap[canonicalCode] = normalizeTeams([...(canonicalMap[canonicalCode] || []), ...teams]);
-  });
-
-  return {
-    canonicalMap,
-    matchedCodes,
-    unmatchedKeys
-  };
-}
-
-function buildImportSummary({ matchedCodes, unmatchedKeys, validCodes, prefix = 'Imported. Saved on this device.' }) {
-  const matchedText = matchedCodes.length > 0 ? matchedCodes.join(', ') : 'none';
-  const ignoredText = unmatchedKeys.length > 0 ? unmatchedKeys.join(', ') : 'none';
-
-  return `${prefix} Imported teams for: ${matchedText}. Ignored: ${ignoredText}. Valid sport codes: ${validCodes.join(', ')}.`;
-}
-
-function setupTeamImport({ sports, onImportComplete }) {
-  const importButton = document.getElementById('importTeamsBtn');
-  const fileInput = document.getElementById('importTeamsInput');
-  const status = document.getElementById('importTeamsStatus');
-
-  const pasteToggleButton = document.getElementById('pasteTeamsBtn');
-  const pastePanel = document.getElementById('pasteTeamsPanel');
-  const pasteInput = document.getElementById('pasteTeamsInput');
-  const generatePreviewButton = document.getElementById('generatePastePreviewBtn');
-  const importNowButton = document.getElementById('importPasteNowBtn');
-  const clearPasteButton = document.getElementById('clearPasteTeamsBtn');
-  const pasteStatus = document.getElementById('pasteTeamsStatus');
-  const pastePreview = document.getElementById('pasteTeamsPreview');
-  const pasteUnparsed = document.getElementById('pasteTeamsUnparsed');
-
-  if (!importButton || !fileInput || !status) return;
-
-  const validCodes = sports
-    .map((sport) => (typeof sport.code === 'string' ? sport.code.trim() : ''))
-    .filter(Boolean);
-  const sportCodeLookup = new Map(validCodes.map((code) => [code.toLowerCase(), code]));
-
-  const setStatus = (message, isError = false) => {
-    status.textContent = message;
-    status.style.color = isError ? '#b00020' : '';
-  };
-
-  const setPasteStatus = (message, isError = false) => {
-    if (!pasteStatus) return;
-    pasteStatus.textContent = message;
-    pasteStatus.style.color = isError ? '#b00020' : '';
-  };
-
-  const applyImportedTeams = ({ importedMap, prefix, includeSavedText = false }) => {
-    const existing = storage.getImportedSportTeams();
-    const nextOverrides = { ...existing };
-    const { canonicalMap, matchedCodes, unmatchedKeys } = mapImportedTeamsBySportCode(importedMap, sportCodeLookup);
-
-    Object.entries(canonicalMap).forEach(([canonicalCode, teams]) => {
-      nextOverrides[canonicalCode] = teams;
-    });
-
-    storage.setImportedSportTeams(nextOverrides);
-    onImportComplete(nextOverrides);
-
-    const message = buildImportSummary({
-      matchedCodes,
-      unmatchedKeys,
-      validCodes,
-      prefix: includeSavedText ? `${prefix} Saved on this device.` : prefix
-    });
-
-    const isError = matchedCodes.length === 0;
-    setStatus(message, isError);
-    console.log(`[Team Import] ${message}`);
-
-    return { matchedCodes, unmatchedKeys, message };
-  };
-
-  const generatePastePreview = () => {
-    if (!pasteInput || !pastePreview || !pasteUnparsed) return null;
-
-    const { groupedTeams, unparsedLines } = parsePastedTeams(pasteInput.value);
-    const { canonicalMap, unmatchedKeys } = mapImportedTeamsBySportCode(groupedTeams, sportCodeLookup);
-
-    pastePreview.textContent = JSON.stringify(canonicalMap, null, 2);
-    const unknownText = unmatchedKeys.length > 0 ? `Unknown sport labels: ${unmatchedKeys.join(', ')}.` : 'Unknown sport labels: none.';
-    const unparsedText = unparsedLines.length > 0 ? `Unparsed lines: ${unparsedLines.join(' | ')}` : 'Unparsed lines: none.';
-
-    pasteUnparsed.textContent = `${unknownText} ${unparsedText}`;
-    setPasteStatus('Preview generated. Review JSON, then click Import Now.');
-
-    return { groupedTeams, unparsedLines };
-  };
-
-  importButton.addEventListener('click', () => fileInput.click());
-
-  fileInput.addEventListener('change', async () => {
-    const [file] = fileInput.files || [];
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const importedMap = parseTeamImport(text);
-      applyImportedTeams({
-        importedMap,
-        prefix: 'Imported.',
-        includeSavedText: true
+      saveState({
+        importedSportTeams: nextImported,
+        userSports: storage.getUserSports().map((sport) => sanitizeSportEntry(sport)).filter(Boolean),
+        sportDraws: nextDraws
       });
-    } catch (error) {
-      setStatus(error?.message || 'Import failed. Check your JSON file.', true);
-    } finally {
-      fileInput.value = '';
-    }
-  });
 
-  pasteToggleButton?.addEventListener('click', () => {
-    if (!pastePanel) return;
-    pastePanel.hidden = !pastePanel.hidden;
-  });
-
-  generatePreviewButton?.addEventListener('click', () => {
-    generatePastePreview();
-  });
-
-  importNowButton?.addEventListener('click', () => {
-    const previewData = generatePastePreview();
-    if (!previewData) return;
-
-    const { groupedTeams } = previewData;
-    const hasAnyLines = Object.keys(groupedTeams).length > 0;
-    if (!hasAnyLines) {
-      setPasteStatus('Nothing to import. Paste team lines first.', true);
-      return;
-    }
-
-    const result = applyImportedTeams({
-      importedMap: groupedTeams,
-      prefix: 'Imported. Saved on this device.',
-      includeSavedText: false
+      statusMessage = `${sportSelection.createdNewSport ? `Created new sport "${sportSelection.displayLabel}". ` : ''}Imported ${deduped.length} team(s) for ${sportSelection.displayLabel}. Ignored ${ignoredCount} duplicate line(s). Mode: ${importMode}.`;
+      rerender();
     });
 
-    if (result.matchedCodes.length === 0) {
-      setPasteStatus('No valid sport codes were matched. Check your sport labels.', true);
-    } else {
-      setPasteStatus('Imported. Saved on this device.');
-    }
-  });
+    document.getElementById('addSingleTeamBtn')?.addEventListener('click', () => {
+      const state = getState();
+      const sportSelection = resolveSportSelection(state);
+      if (!sportSelection) {
+        statusMessage = 'Select or type a sport before adding a team.';
+        rerender();
+        return;
+      }
 
-  clearPasteButton?.addEventListener('click', () => {
-    if (pasteInput) pasteInput.value = '';
-    if (pastePreview) pastePreview.textContent = '';
-    if (pasteUnparsed) pasteUnparsed.textContent = '';
-    setPasteStatus('');
+      const singleTeamInput = document.getElementById('singleTeamInput');
+      const teamName = String(singleTeamInput?.value || '').trim();
+      if (!teamName) {
+        statusMessage = 'Enter a team name before clicking Add Team.';
+        rerender();
+        return;
+      }
+
+      const existingTeams = state.importedSportTeams[sportSelection.lookupKey] || [];
+      const deduped = dedupeTeamNames([...existingTeams, teamName]);
+      const added = deduped.length > existingTeams.length;
+
+      const nextImported = { ...state.importedSportTeams, [sportSelection.lookupKey]: deduped };
+      const nextDraws = { ...state.sportDraws };
+      delete nextDraws[sportSelection.lookupKey];
+
+      saveState({ importedSportTeams: nextImported, userSports: storage.getUserSports(), sportDraws: nextDraws });
+      statusMessage = added
+        ? `${sportSelection.createdNewSport ? `Created new sport "${sportSelection.displayLabel}". ` : ''}Added ${teamName} to ${sportSelection.displayLabel}.`
+        : `Ignored duplicate team "${teamName}" for ${sportSelection.displayLabel}.`;
+      rerender();
+    });
+
+    document.getElementById('clearSelectedSportBtn')?.addEventListener('click', () => {
+      const state = getState();
+      const sportSelection = resolveSportSelection(state);
+      if (!sportSelection) {
+        statusMessage = 'Select or type a sport to clear.';
+        rerender();
+        return;
+      }
+
+      const nextImported = { ...state.importedSportTeams };
+      const nextDraws = { ...state.sportDraws };
+      delete nextImported[sportSelection.lookupKey];
+      delete nextDraws[sportSelection.lookupKey];
+
+      saveState({ importedSportTeams: nextImported, userSports: state.userSports, sportDraws: nextDraws });
+      statusMessage = `Cleared teams and draw for ${sportSelection.displayLabel}.`;
+      rerender();
+    });
+
+    document.getElementById('clearAllSportsDataBtn')?.addEventListener('click', () => {
+      const confirmed = window.confirm('This clears imported teams, user-created sports, and generated draws for this feature only. Continue?');
+      if (!confirmed) return;
+
+      saveState({ importedSportTeams: {}, userSports: [], sportDraws: {} });
+      statusMessage = 'Cleared all imported teams, user-created sports, and generated draws.';
+      rerender();
+    });
+
+    document.querySelectorAll('.generate-draw-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sportKey = sportLookupKey(button.dataset.sportKey);
+        const modeSelect = document.querySelector(`.draw-mode[data-sport-key="${sportKey}"]`);
+        const mode = modeSelect?.value || 'listed';
+        const state = getState();
+        const sport = state.sports.find((item) => item.lookupKey === sportKey);
+
+        if (!sport || sport.teams.length === 0) {
+          statusMessage = 'No teams found for this sport. Add teams before generating a draw.';
+          rerender();
+          return;
+        }
+
+        const sourceTeams = mode === 'random' ? shuffleTeams(sport.teams) : sport.teams;
+        const generated = pairTeams(sourceTeams);
+        const nextDraws = { ...state.sportDraws, [sportKey]: generated };
+
+        saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
+        statusMessage = `Generated draw for ${sport.code} (${mode === 'random' ? 'Random' : 'As listed'}).`;
+        rerender();
+      });
+    });
+
+    document.querySelectorAll('.clear-draw-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sportKey = sportLookupKey(button.dataset.sportKey);
+        const state = getState();
+        const sport = state.sports.find((item) => item.lookupKey === sportKey);
+        const nextDraws = { ...state.sportDraws };
+        delete nextDraws[sportKey];
+
+        saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
+        statusMessage = `Cleared draw for ${sport?.code || 'selected sport'}.`;
+        rerender();
+      });
+    });
+
+    document.querySelectorAll('.clear-sport-teams-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sportKey = sportLookupKey(button.dataset.sportKey);
+        const state = getState();
+        const sport = state.sports.find((item) => item.lookupKey === sportKey);
+
+        const nextImported = { ...state.importedSportTeams };
+        const nextDraws = { ...state.sportDraws };
+        delete nextImported[sportKey];
+        delete nextDraws[sportKey];
+
+        saveState({ importedSportTeams: nextImported, userSports: state.userSports, sportDraws: nextDraws });
+        statusMessage = `Cleared teams for ${sport?.code || 'selected sport'}.`;
+        rerender();
+      });
+    });
+  };
+
+  rerender();
+}
+
+function setupCacheResetButton() {
+  const button = document.getElementById('updateCacheBtn');
+  if (!button) return;
+
+  button.addEventListener('click', async () => {
+    const confirmed = window.confirm('This will refresh the app and clear cached files so you get the latest version. Your saved teams stay on this device.');
+    if (!confirmed) return;
+
+    if ('serviceWorker' in navigator) {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map((registration) => registration.unregister()));
+    }
+
+    if ('caches' in window) {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map((cacheKey) => caches.delete(cacheKey)));
+    }
+
+    window.location.reload();
   });
 }
 
@@ -436,6 +545,7 @@ async function main() {
   try {
     const eventData = await getJson('event.json');
     renderShell(eventData);
+    setupCacheResetButton();
 
     const session = storage.getSession();
     storage.setSession({ ...session, lastVisited: new Date().toISOString(), page });
@@ -444,18 +554,7 @@ async function main() {
     if (page === 'programme') renderProgramme(await getJson('programme.json'));
     if (page === 'sports') {
       const sports = await getJson('sports.json');
-      const overrides = storage.getImportedSportTeams();
-      let mergedSports = applyTeamOverrides(sports, overrides);
-
-      renderSports(mergedSports);
-
-      setupTeamImport({
-        sports,
-        onImportComplete(nextOverrides) {
-          mergedSports = applyTeamOverrides(sports, nextOverrides);
-          renderSports(mergedSports);
-        }
-      });
+      setupSportsManager(sports);
     }
     if (page === 'venue') renderVenue(eventData);
     if (page === 'gallery') renderGallery(await getJson('gallery.json'));
