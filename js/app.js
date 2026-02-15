@@ -157,7 +157,12 @@ function setupTeamImport({ sports, onImportComplete }) {
 
   if (!importButton || !fileInput || !status) return;
 
-  const sportCodes = new Set(sports.map((sport) => sport.code));
+  const sportCodeLookup = new Map(
+    sports
+      .map((sport) => (typeof sport.code === 'string' ? sport.code.trim() : ''))
+      .filter(Boolean)
+      .map((code) => [code.toLowerCase(), code])
+  );
 
   const setStatus = (message, isError = false) => {
     status.textContent = message;
@@ -177,9 +182,14 @@ function setupTeamImport({ sports, onImportComplete }) {
       const nextOverrides = { ...existing };
 
       let matched = 0;
+      const unmatchedCodes = [];
       Object.entries(importedMap).forEach(([sportCode, teams]) => {
-        if (!sportCodes.has(sportCode)) return;
-        nextOverrides[sportCode] = teams;
+        const canonicalCode = sportCodeLookup.get(sportCode.toLowerCase());
+        if (!canonicalCode) {
+          unmatchedCodes.push(sportCode);
+          return;
+        }
+        nextOverrides[canonicalCode] = teams;
         matched += 1;
       });
 
@@ -187,7 +197,10 @@ function setupTeamImport({ sports, onImportComplete }) {
       onImportComplete(nextOverrides);
 
       if (matched === 0) {
-        setStatus('No matching sports found in file.');
+        const availableCodes = Array.from(sportCodeLookup.values()).join(', ');
+        setStatus(`No matching sports found. Available sport codes: ${availableCodes}.`, true);
+      } else if (unmatchedCodes.length > 0) {
+        setStatus(`Imported ${matched} sport(s). Unmatched in file: ${unmatchedCodes.join(', ')}.`);
       } else {
         setStatus('Imported. Saved on this device.');
       }
