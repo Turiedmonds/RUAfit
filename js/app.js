@@ -97,6 +97,50 @@ function getRoundRobinSummary(teamCount) {
   return { rounds, matchesPerRound, totalMatches };
 }
 
+function getTeamListCountFromText(text) {
+  return String(text || '')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean).length;
+}
+
+function groupMatchesByRound(matches) {
+  const grouped = new Map();
+
+  matches.forEach((match, index) => {
+    const roundNumber = Number.isInteger(match.round) && match.round > 0 ? match.round : 1;
+    if (!grouped.has(roundNumber)) grouped.set(roundNumber, []);
+    grouped.get(roundNumber).push({
+      ...match,
+      globalMatchNumber: index + 1
+    });
+  });
+
+  return [...grouped.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([round, roundMatches]) => ({ round, matches: roundMatches }));
+}
+
+function renderRoundGroups(roundGroups) {
+  return roundGroups.map((roundGroup) => `
+    <section class="round-group">
+      <h4 class="round-heading">Round ${roundGroup.round}</h4>
+      <ul>
+        ${roundGroup.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)} <span class="small">(Overall match ${match.globalMatchNumber})</span></li>`).join('')}
+      </ul>
+    </section>
+  `).join('');
+}
+
+function renderNamedRoundGroups(rounds) {
+  return rounds.map((round) => `
+    <section class="round-group">
+      <h4 class="round-heading">${escapeHtml(round.name)}</h4>
+      <ul>${round.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>
+    </section>
+  `).join('');
+}
+
 function roundNameFromMatchCount(matchCount, fallbackIndex) {
   if (matchCount === 1) return 'Final';
   if (matchCount === 2) return 'Semifinals';
@@ -289,6 +333,8 @@ function renderProgramme(programme) {
 }
 
 function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
+  const totalTeams = sports.reduce((sum, sport) => sum + sport.teams.length, 0);
+
   const optionsHtml = sports.map((sport) => `
     <option value="${escapeHtml(sport.lookupKey)}">${escapeHtml(sport.code)}</option>
   `).join('');
@@ -298,6 +344,11 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
     <section class="card">
       <h2>Manage Teams</h2>
       <p class="small">Paste one team per line. You can select an existing sport or type a new one.</p>
+      <div class="sports-summary" id="sportsManagerSummary" aria-live="polite">
+        <p class="small"><strong>Summary:</strong> ${sports.length} sport(s), ${totalTeams} team(s) total.</p>
+        <p class="small" id="selectedSportCount">Select a sport to see its current team count.</p>
+        <p class="small" id="pasteTeamsCount">Pasted team lines: 0</p>
+      </div>
       <label for="teamSportSelect">Choose sport</label>
       <select id="teamSportSelect" class="field-input">
         <option value="">Select a sport</option>
@@ -328,7 +379,7 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
     ${sports.map((sport) => {
       const teamsHtml = sport.teams.length === 0
         ? '<p class="small">No teams yet.</p>'
-        : `<h3>Teams</h3><ul>${sport.teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
+        : `<h3>Teams (${sport.teams.length})</h3><p class="small">Live team count: ${sport.teams.length}</p><ul>${sport.teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
 
       const poolHtml = sport.draw.poolMatches.length === 0
         ? '<p class="small">No pool-play draw generated.</p>'
@@ -338,7 +389,9 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
             ? `<p class="small">Auto-generated full round robin: ${summary.rounds} rounds × ${summary.matchesPerRound} matches per round = ${summary.totalMatches} total matches.</p>`
             : '';
 
-          return `<h3>Pool Play (Round Robin)</h3>${summaryHtml}<ul>${sport.draw.poolMatches.map((match, index) => `<li>Match ${index + 1}${match.round ? ` (Round ${match.round})` : ''}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+          const roundGroups = groupMatchesByRound(sport.draw.poolMatches);
+
+          return `<h3>Pool Play (Round Robin)</h3>${summaryHtml}${renderRoundGroups(roundGroups)}`;
         })();
 
       const savedCustom = sport.draw.customRounds;
@@ -346,13 +399,13 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
       const customHtml = savedCustom
         ? `<h3>Saved Custom Rounds</h3>
             <p class="small">${savedCustom.roundCount} round(s), ${savedCustom.teamCount} teams, pairing: ${savedCustom.pairingMode === 'random' ? 'Random draw' : 'Sequential top-vs-bottom'}.</p>
-            ${savedCustom.rounds.map((round) => `<h4>${escapeHtml(round.name)}</h4><ul>${round.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`).join('')}`
+            ${renderNamedRoundGroups(savedCustom.rounds)}`
         : '<p class="small">No custom rounds saved yet.</p>';
 
       const previewHtml = previewCustom
         ? `<h3>Preview (not saved yet)</h3>
             <p class="small">Please review and click Save Custom Rounds.</p>
-            ${previewCustom.rounds.map((round) => `<h4>${escapeHtml(round.name)}</h4><ul>${round.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`).join('')}`
+            ${renderNamedRoundGroups(previewCustom.rounds)}`
         : '<p class="small">No custom bracket preview generated.</p>';
 
       return `
@@ -459,6 +512,30 @@ function setupSportsManager(baseSports) {
   };
 
   const bindEvents = () => {
+    const updateManageTeamIndicators = () => {
+      const state = getState();
+      const selectedSportKey = sportLookupKey(document.getElementById('teamSportSelect')?.value);
+      const typedSport = String(document.getElementById('newSportInput')?.value || '').trim();
+      const typedSportKey = sportLookupKey(typedSport);
+      const targetSport = state.sports.find((sport) => sport.lookupKey === (typedSportKey || selectedSportKey));
+
+      const selectedSportCount = document.getElementById('selectedSportCount');
+      if (selectedSportCount) {
+        selectedSportCount.textContent = targetSport
+          ? `${targetSport.code}: ${targetSport.teams.length} team(s) currently listed.`
+          : 'Select or type a sport to see its current team count.';
+      }
+
+      const pasteLines = getTeamListCountFromText(document.getElementById('pasteTeamsInput')?.value || '');
+      const pasteTeamsCount = document.getElementById('pasteTeamsCount');
+      if (pasteTeamsCount) pasteTeamsCount.textContent = `Pasted team lines: ${pasteLines}`;
+    };
+
+    document.getElementById('teamSportSelect')?.addEventListener('change', updateManageTeamIndicators);
+    document.getElementById('newSportInput')?.addEventListener('input', updateManageTeamIndicators);
+    document.getElementById('pasteTeamsInput')?.addEventListener('input', updateManageTeamIndicators);
+    updateManageTeamIndicators();
+
     document.getElementById('applyTeamImportBtn')?.addEventListener('click', () => {
       const state = getState();
       const sportSelection = resolveSportSelection(state);
