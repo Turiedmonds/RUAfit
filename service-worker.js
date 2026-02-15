@@ -1,5 +1,5 @@
-const CACHE_NAME = 'ruafit-static-v2';
-const ASSET_CACHE = 'ruafit-assets-v2';
+const CACHE_NAME = 'ruafit-static-v3';
+const ASSET_CACHE = 'ruafit-assets-v3';
 const BASE_PATH = new URL(self.registration.scope).pathname;
 const RELOAD_MESSAGE_TYPE = 'SERVICE_WORKER_UPDATED';
 
@@ -65,6 +65,10 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
+  const requestUrl = new URL(event.request.url);
+  const isDataRequest = requestUrl.origin === self.location.origin
+    && requestUrl.pathname.startsWith(`${BASE_PATH}data/`);
+
   if (event.request.mode === 'navigate') {
     event.respondWith(
       fetch(event.request)
@@ -76,6 +80,23 @@ self.addEventListener('fetch', (event) => {
         .catch(async () => {
           const cache = await caches.open(CACHE_NAME);
           return (await cache.match(event.request)) || (await cache.match(`${BASE_PATH}offline.html`));
+        })
+    );
+    return;
+  }
+
+  if (isDataRequest) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response.ok) {
+            caches.open(ASSET_CACHE).then((cache) => cache.put(event.request, response.clone()));
+          }
+          return response;
+        })
+        .catch(async () => {
+          const cache = await caches.open(ASSET_CACHE);
+          return (await cache.match(event.request)) || (await caches.match(`${BASE_PATH}offline.html`));
         })
     );
     return;
