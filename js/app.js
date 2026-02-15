@@ -150,23 +150,173 @@ function parseTeamImport(rawText) {
   return normalized;
 }
 
+function parsePastedTeams(rawText) {
+  const groupedBySport = {};
+  const unparsedLines = [];
+  const lines = String(rawText || '').split(/\r?\n/);
+  let currentHeader = '';
+
+  const addTeam = (sportLabel, teamName) => {
+    if (!groupedBySport[sportLabel]) groupedBySport[sportLabel] = [];
+    groupedBySport[sportLabel].push(teamName);
+  };
+
+  const parseSeparatedLine = (line) => {
+    const separators = [',', '\t', ' - '];
+    for (const separator of separators) {
+      const separatorIndex = line.indexOf(separator);
+      if (separatorIndex < 0) continue;
+
+      const sportLabel = line.slice(0, separatorIndex).trim();
+      const teamName = line.slice(separatorIndex + separator.length).trim();
+      if (!sportLabel || !teamName) return null;
+
+      return { sportLabel, teamName };
+    }
+
+    return null;
+  };
+
+  lines.forEach((rawLine) => {
+    const line = rawLine.trim();
+    if (!line) return;
+
+    if (line.endsWith(':')) {
+      const header = line.slice(0, -1).trim();
+      if (!header) {
+        unparsedLines.push(rawLine);
+        currentHeader = '';
+        return;
+      }
+      currentHeader = header;
+      return;
+    }
+
+    const separated = parseSeparatedLine(line);
+    if (separated) {
+      addTeam(separated.sportLabel, separated.teamName);
+      return;
+    }
+
+    if (currentHeader) {
+      addTeam(currentHeader, line);
+      return;
+    }
+
+    unparsedLines.push(rawLine);
+  });
+
+  const normalized = {};
+  Object.entries(groupedBySport).forEach(([sportLabel, teams]) => {
+    normalized[sportLabel] = normalizeTeams(teams);
+  });
+
+  return { groupedTeams: normalized, unparsedLines };
+}
+
+function mapImportedTeamsBySportCode(importedMap, sportCodeLookup) {
+  const canonicalMap = {};
+  const matchedCodes = [];
+  const unmatchedKeys = [];
+
+  Object.entries(importedMap).forEach(([sportCode, teams]) => {
+    const canonicalCode = sportCodeLookup.get(sportCode.toLowerCase());
+    if (!canonicalCode) {
+      unmatchedKeys.push(sportCode);
+      return;
+    }
+
+    if (!canonicalMap[canonicalCode]) matchedCodes.push(canonicalCode);
+    canonicalMap[canonicalCode] = normalizeTeams([...(canonicalMap[canonicalCode] || []), ...teams]);
+  });
+
+  return {
+    canonicalMap,
+    matchedCodes,
+    unmatchedKeys
+  };
+}
+
+function buildImportSummary({ matchedCodes, unmatchedKeys, validCodes, prefix = 'Imported. Saved on this device.' }) {
+  const matchedText = matchedCodes.length > 0 ? matchedCodes.join(', ') : 'none';
+  const ignoredText = unmatchedKeys.length > 0 ? unmatchedKeys.join(', ') : 'none';
+
+  return `${prefix} Imported teams for: ${matchedText}. Ignored: ${ignoredText}. Valid sport codes: ${validCodes.join(', ')}.`;
+}
+
 function setupTeamImport({ sports, onImportComplete }) {
   const importButton = document.getElementById('importTeamsBtn');
   const fileInput = document.getElementById('importTeamsInput');
   const status = document.getElementById('importTeamsStatus');
 
+  const pasteToggleButton = document.getElementById('pasteTeamsBtn');
+  const pastePanel = document.getElementById('pasteTeamsPanel');
+  const pasteInput = document.getElementById('pasteTeamsInput');
+  const generatePreviewButton = document.getElementById('generatePastePreviewBtn');
+  const importNowButton = document.getElementById('importPasteNowBtn');
+  const clearPasteButton = document.getElementById('clearPasteTeamsBtn');
+  const pasteStatus = document.getElementById('pasteTeamsStatus');
+  const pastePreview = document.getElementById('pasteTeamsPreview');
+  const pasteUnparsed = document.getElementById('pasteTeamsUnparsed');
+
   if (!importButton || !fileInput || !status) return;
 
-  const sportCodeLookup = new Map(
-    sports
-      .map((sport) => (typeof sport.code === 'string' ? sport.code.trim() : ''))
-      .filter(Boolean)
-      .map((code) => [code.toLowerCase(), code])
-  );
+  const validCodes = sports
+    .map((sport) => (typeof sport.code === 'string' ? sport.code.trim() : ''))
+    .filter(Boolean);
+  const sportCodeLookup = new Map(validCodes.map((code) => [code.toLowerCase(), code]));
 
   const setStatus = (message, isError = false) => {
     status.textContent = message;
     status.style.color = isError ? '#b00020' : '';
+  };
+
+  const setPasteStatus = (message, isError = false) => {
+    if (!pasteStatus) return;
+    pasteStatus.textContent = message;
+    pasteStatus.style.color = isError ? '#b00020' : '';
+  };
+
+  const applyImportedTeams = ({ importedMap, prefix, includeSavedText = false }) => {
+    const existing = storage.getImportedSportTeams();
+    const nextOverrides = { ...existing };
+    const { canonicalMap, matchedCodes, unmatchedKeys } = mapImportedTeamsBySportCode(importedMap, sportCodeLookup);
+
+    Object.entries(canonicalMap).forEach(([canonicalCode, teams]) => {
+      nextOverrides[canonicalCode] = teams;
+    });
+
+    storage.setImportedSportTeams(nextOverrides);
+    onImportComplete(nextOverrides);
+
+    const message = buildImportSummary({
+      matchedCodes,
+      unmatchedKeys,
+      validCodes,
+      prefix: includeSavedText ? `${prefix} Saved on this device.` : prefix
+    });
+
+    const isError = matchedCodes.length === 0;
+    setStatus(message, isError);
+    console.log(`[Team Import] ${message}`);
+
+    return { matchedCodes, unmatchedKeys, message };
+  };
+
+  const generatePastePreview = () => {
+    if (!pasteInput || !pastePreview || !pasteUnparsed) return null;
+
+    const { groupedTeams, unparsedLines } = parsePastedTeams(pasteInput.value);
+    const { canonicalMap, unmatchedKeys } = mapImportedTeamsBySportCode(groupedTeams, sportCodeLookup);
+
+    pastePreview.textContent = JSON.stringify(canonicalMap, null, 2);
+    const unknownText = unmatchedKeys.length > 0 ? `Unknown sport labels: ${unmatchedKeys.join(', ')}.` : 'Unknown sport labels: none.';
+    const unparsedText = unparsedLines.length > 0 ? `Unparsed lines: ${unparsedLines.join(' | ')}` : 'Unparsed lines: none.';
+
+    pasteUnparsed.textContent = `${unknownText} ${unparsedText}`;
+    setPasteStatus('Preview generated. Review JSON, then click Import Now.');
+
+    return { groupedTeams, unparsedLines };
   };
 
   importButton.addEventListener('click', () => fileInput.click());
@@ -178,37 +328,56 @@ function setupTeamImport({ sports, onImportComplete }) {
     try {
       const text = await file.text();
       const importedMap = parseTeamImport(text);
-      const existing = storage.getImportedSportTeams();
-      const nextOverrides = { ...existing };
-
-      let matched = 0;
-      const unmatchedCodes = [];
-      Object.entries(importedMap).forEach(([sportCode, teams]) => {
-        const canonicalCode = sportCodeLookup.get(sportCode.toLowerCase());
-        if (!canonicalCode) {
-          unmatchedCodes.push(sportCode);
-          return;
-        }
-        nextOverrides[canonicalCode] = teams;
-        matched += 1;
+      applyImportedTeams({
+        importedMap,
+        prefix: 'Imported.',
+        includeSavedText: true
       });
-
-      storage.setImportedSportTeams(nextOverrides);
-      onImportComplete(nextOverrides);
-
-      if (matched === 0) {
-        const availableCodes = Array.from(sportCodeLookup.values()).join(', ');
-        setStatus(`No matching sports found. Available sport codes: ${availableCodes}.`, true);
-      } else if (unmatchedCodes.length > 0) {
-        setStatus(`Imported ${matched} sport(s). Unmatched in file: ${unmatchedCodes.join(', ')}.`);
-      } else {
-        setStatus('Imported. Saved on this device.');
-      }
     } catch (error) {
       setStatus(error?.message || 'Import failed. Check your JSON file.', true);
     } finally {
       fileInput.value = '';
     }
+  });
+
+  pasteToggleButton?.addEventListener('click', () => {
+    if (!pastePanel) return;
+    pastePanel.hidden = !pastePanel.hidden;
+  });
+
+  generatePreviewButton?.addEventListener('click', () => {
+    generatePastePreview();
+  });
+
+  importNowButton?.addEventListener('click', () => {
+    const previewData = generatePastePreview();
+    if (!previewData) return;
+
+    const { groupedTeams } = previewData;
+    const hasAnyLines = Object.keys(groupedTeams).length > 0;
+    if (!hasAnyLines) {
+      setPasteStatus('Nothing to import. Paste team lines first.', true);
+      return;
+    }
+
+    const result = applyImportedTeams({
+      importedMap: groupedTeams,
+      prefix: 'Imported. Saved on this device.',
+      includeSavedText: false
+    });
+
+    if (result.matchedCodes.length === 0) {
+      setPasteStatus('No valid sport codes were matched. Check your sport labels.', true);
+    } else {
+      setPasteStatus('Imported. Saved on this device.');
+    }
+  });
+
+  clearPasteButton?.addEventListener('click', () => {
+    if (pasteInput) pasteInput.value = '';
+    if (pastePreview) pastePreview.textContent = '';
+    if (pasteUnparsed) pasteUnparsed.textContent = '';
+    setPasteStatus('');
   });
 }
 
