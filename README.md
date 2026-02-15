@@ -42,5 +42,7 @@ Organisers only edit these files.
 2. Set **Source** to **GitHub Actions**.
 3. Push to `main` to trigger deployment.
 
+> **Note:** The GitHub Actions workflow currently uses `npm install` because this repository does not include a `package-lock.json` yet. Once a lockfile is added, we can switch back to `npm ci` for more repeatable builds.
+
 Your deployed site URL will be:
 `https://turiedmonds.github.io/RUAfit/`
