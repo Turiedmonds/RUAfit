@@ -1,0 +1,10 @@
+{
+  "name": "RUAfit Event App",
+  "short_name": "RUAfit",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "theme_color": "#0d47a1",
+  "background_color": "#f4f6f8",
+  "icons": []
+}

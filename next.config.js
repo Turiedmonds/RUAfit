@@ -1,18 +1,3 @@
-/** @type {import('next').NextConfig} */
-const isGitHubPages = process.env.GITHUB_PAGES === 'true';
-
-const nextConfig = {
-  output: 'export',
-  trailingSlash: true,
-  images: {
-    unoptimized: true,
-  },
-  ...(isGitHubPages
-    ? {
-        basePath: '/RUAfit',
-        assetPrefix: '/RUAfit/',
-      }
-    : {}),
-};
-
-module.exports = nextConfig;
+// Legacy file retained for repository history.
+// The app is now deployed as static HTML/CSS/JS via GitHub Pages workflow.
+module.exports = {};
