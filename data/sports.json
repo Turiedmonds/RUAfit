@@ -2,13 +2,11 @@
   {
     "code": "Netball",
     "location": "Courts 1–4",
-    "drawUrl": "https://example.com/netball-draw",
     "notes": "Games are 2x10 minute halves."
   },
   {
     "code": "Touch Rugby",
     "location": "Field A & B",
-    "drawUrl": "https://example.com/touch-draw",
     "notes": "Mixed teams only."
   }
 ]
