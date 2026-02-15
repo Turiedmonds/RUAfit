@@ -396,6 +396,8 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
 
       const savedCustom = sport.draw.customRounds;
       const previewCustom = previewCustomDraws[sport.lookupKey] || null;
+      const selectedCustomRoundCount = previewCustom?.roundCount ?? savedCustom?.roundCount ?? 2;
+      const selectedCustomPairingMode = previewCustom?.pairingMode || savedCustom?.pairingMode || 'sequential';
       const customHtml = savedCustom
         ? `<h3>Saved Custom Rounds</h3>
             <p class="small">${savedCustom.roundCount} round(s), ${savedCustom.teamCount} teams, pairing: ${savedCustom.pairingMode === 'random' ? 'Random draw' : 'Sequential top-vs-bottom'}.</p>
@@ -428,11 +430,11 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
           <div class="draw-controls">
             <h3>Custom Rounds</h3>
             <label for="roundCount-${escapeHtml(sport.lookupKey)}">Number of custom rounds after pool play</label>
-            <input id="roundCount-${escapeHtml(sport.lookupKey)}" class="field-input custom-round-count" data-sport-key="${escapeHtml(sport.lookupKey)}" type="number" min="1" max="6" value="${savedCustom?.roundCount || 2}" />
+            <input id="roundCount-${escapeHtml(sport.lookupKey)}" class="field-input custom-round-count" data-sport-key="${escapeHtml(sport.lookupKey)}" type="number" min="1" max="6" value="${selectedCustomRoundCount}" />
             <label for="customPairingMode-${escapeHtml(sport.lookupKey)}">Custom pairing style</label>
             <select id="customPairingMode-${escapeHtml(sport.lookupKey)}" class="field-input custom-pairing-mode" data-sport-key="${escapeHtml(sport.lookupKey)}">
-              <option value="sequential" ${savedCustom?.pairingMode !== 'random' ? 'selected' : ''}>Sequential (top vs bottom)</option>
-              <option value="random" ${savedCustom?.pairingMode === 'random' ? 'selected' : ''}>Random draw</option>
+              <option value="sequential" ${selectedCustomPairingMode !== 'random' ? 'selected' : ''}>Sequential (top vs bottom)</option>
+              <option value="random" ${selectedCustomPairingMode === 'random' ? 'selected' : ''}>Random draw</option>
             </select>
             <button type="button" class="button preview-custom-rounds-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Preview Custom Rounds</button>
             <button type="button" class="button save-custom-rounds-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Save Custom Rounds</button>
