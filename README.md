@@ -35,3 +35,12 @@ Organisers only edit these files.
 ## 🚀 Getting Started
 
 ### 1. Install dependencies
+
+### 2. Deploy to GitHub Pages
+
+1. In GitHub, open **Settings → Pages**.
+2. Set **Source** to **GitHub Actions**.
+3. Push to `main` to trigger deployment.
+
+Your deployed site URL will be:
+`https://turiedmonds.github.io/RUAfit/`
