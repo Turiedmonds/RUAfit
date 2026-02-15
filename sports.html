@@ -9,6 +9,11 @@
   <title>RUAfit | Sports</title>
 </head>
 <body data-page="sports">
+  <div class="page-toolbar">
+    <button type="button" id="importTeamsBtn" class="button">Import Teams</button>
+    <input type="file" id="importTeamsInput" accept=".json,application/json" hidden />
+    <p id="importTeamsStatus" class="small" aria-live="polite"></p>
+  </div>
   <main id="app" class="main-content"></main>
   <script type="module" src="./js/app.js"></script>
 </body>

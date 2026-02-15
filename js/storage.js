@@ -40,5 +40,11 @@ export const storage = {
   },
   setCachedData(payload) {
     return write('cachedData', payload);
+  },
+  getImportedSportTeams() {
+    return read('importedSportTeams', {});
+  },
+  setImportedSportTeams(payload) {
+    return write('importedSportTeams', payload);
   }
 };
