@@ -1,4 +1,5 @@
 import gallery from "../data/gallery.json";
+import GalleryItem from "../components/GalleryItem";
 
 export default function Gallery() {
   return (
@@ -7,14 +8,11 @@ export default function Gallery() {
 
       <div className="grid grid-cols-2 gap-4">
         {gallery.map((photo, index) => (
-          <div key={index}>
-            <img
-              src={photo.image}
-              alt={photo.caption}
-              className="rounded shadow"
-            />
-            <p className="text-sm text-gray-600 mt-1">{photo.caption}</p>
-          </div>
+          <GalleryItem
+            key={index}
+            image={photo.image}
+            caption={photo.caption}
+          />
         ))}
       </div>
     </div>
