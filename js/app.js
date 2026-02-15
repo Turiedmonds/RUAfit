@@ -81,14 +81,122 @@ function renderProgramme(programme) {
 }
 
 function renderSports(sports) {
-  app.innerHTML = `<h1>Sports</h1>${sports.map((sport) => `
-    <section class="card">
-      <h2>${escapeHtml(sport.code)}</h2>
-      <p>Location: ${escapeHtml(sport.location)}</p>
-      <p>${escapeHtml(sport.notes)}</p>
-      <a href="${escapeHtml(sport.drawUrl)}" target="_blank" rel="noreferrer">View draw</a>
-    </section>
-  `).join('')}`;
+  app.innerHTML = `<h1>Sports</h1>${sports.map((sport) => {
+    const teams = Array.isArray(sport.teams) ? sport.teams : [];
+    const teamsHtml = teams.length === 0
+      ? ''
+      : `<h3>Teams</h3><ul>${teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
+
+    return `
+      <section class="card">
+        <h2>${escapeHtml(sport.code)}</h2>
+        <p>Location: ${escapeHtml(sport.location)}</p>
+        <p>${escapeHtml(sport.notes)}</p>
+        <a href="${escapeHtml(sport.drawUrl)}" target="_blank" rel="noreferrer">View draw</a>
+        ${teamsHtml}
+      </section>
+    `;
+  }).join('')}`;
+}
+
+function normalizeTeams(teams) {
+  if (!Array.isArray(teams)) return [];
+
+  const seen = new Set();
+  const normalized = [];
+
+  teams.forEach((team) => {
+    if (typeof team !== 'string') return;
+    const cleaned = team.trim();
+    if (!cleaned) return;
+
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+
+    seen.add(key);
+    normalized.push(cleaned);
+  });
+
+  return normalized;
+}
+
+function applyTeamOverrides(sports, teamOverrides) {
+  if (!teamOverrides || typeof teamOverrides !== 'object') return sports;
+
+  return sports.map((sport) => {
+    if (!Object.prototype.hasOwnProperty.call(teamOverrides, sport.code)) return sport;
+
+    return {
+      ...sport,
+      teams: normalizeTeams(teamOverrides[sport.code])
+    };
+  });
+}
+
+function parseTeamImport(rawText) {
+  const parsed = JSON.parse(rawText);
+  if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+    throw new Error('Invalid format. Use { "Sport Code": ["Team A", "Team B"] }.');
+  }
+
+  const normalized = {};
+  Object.entries(parsed).forEach(([sportCode, teams]) => {
+    if (typeof sportCode !== 'string') return;
+    const code = sportCode.trim();
+    if (!code) return;
+    normalized[code] = normalizeTeams(teams);
+  });
+
+  return normalized;
+}
+
+function setupTeamImport({ sports, onImportComplete }) {
+  const importButton = document.getElementById('importTeamsBtn');
+  const fileInput = document.getElementById('importTeamsInput');
+  const status = document.getElementById('importTeamsStatus');
+
+  if (!importButton || !fileInput || !status) return;
+
+  const sportCodes = new Set(sports.map((sport) => sport.code));
+
+  const setStatus = (message, isError = false) => {
+    status.textContent = message;
+    status.style.color = isError ? '#b00020' : '';
+  };
+
+  importButton.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', async () => {
+    const [file] = fileInput.files || [];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const importedMap = parseTeamImport(text);
+      const existing = storage.getImportedSportTeams();
+      const nextOverrides = { ...existing };
+
+      let matched = 0;
+      Object.entries(importedMap).forEach(([sportCode, teams]) => {
+        if (!sportCodes.has(sportCode)) return;
+        nextOverrides[sportCode] = teams;
+        matched += 1;
+      });
+
+      storage.setImportedSportTeams(nextOverrides);
+      onImportComplete(nextOverrides);
+
+      if (matched === 0) {
+        setStatus('No matching sports found in file.');
+      } else {
+        setStatus('Imported. Saved on this device.');
+      }
+    } catch (error) {
+      setStatus(error?.message || 'Import failed. Check your JSON file.', true);
+    } finally {
+      fileInput.value = '';
+    }
+  });
 }
 
 function renderVenue(eventData) {
@@ -152,7 +260,21 @@ async function main() {
 
     if (page === 'index') renderHome(eventData);
     if (page === 'programme') renderProgramme(await getJson('programme.json'));
-    if (page === 'sports') renderSports(await getJson('sports.json'));
+    if (page === 'sports') {
+      const sports = await getJson('sports.json');
+      const overrides = storage.getImportedSportTeams();
+      let mergedSports = applyTeamOverrides(sports, overrides);
+
+      renderSports(mergedSports);
+
+      setupTeamImport({
+        sports,
+        onImportComplete(nextOverrides) {
+          mergedSports = applyTeamOverrides(sports, nextOverrides);
+          renderSports(mergedSports);
+        }
+      });
+    }
     if (page === 'venue') renderVenue(eventData);
     if (page === 'gallery') renderGallery(await getJson('gallery.json'));
     if (page === 'announcements') renderAnnouncements(await getJson('announcements.json'));
