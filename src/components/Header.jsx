@@ -13,6 +13,7 @@ export default function Header() {
           <Link href="/sports">Sports</Link>
           <Link href="/venue">Venue</Link>
           <Link href="/gallery">Gallery</Link>
+          <Link href="/announcements">Announcements</Link>
         </nav>
       </div>
     </header>
