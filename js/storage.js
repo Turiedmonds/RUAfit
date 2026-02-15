@@ -46,5 +46,17 @@ export const storage = {
   },
   setImportedSportTeams(payload) {
     return write('importedSportTeams', payload);
+  },
+  getUserSports() {
+    return read('userSports', []);
+  },
+  setUserSports(payload) {
+    return write('userSports', payload);
+  },
+  getSportDraws() {
+    return read('sportDraws', {});
+  },
+  setSportDraws(payload) {
+    return write('sportDraws', payload);
   }
 };
