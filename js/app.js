@@ -58,12 +58,118 @@ function shuffleTeams(teams) {
   return shuffled;
 }
 
-function pairTeams(teams) {
-  const pairs = [];
-  for (let index = 0; index < teams.length; index += 2) {
-    pairs.push({ home: teams[index], away: teams[index + 1] || 'BYE' });
+function generateRoundRobinMatches(teams) {
+  const cleanTeams = Array.isArray(teams) ? [...teams] : [];
+  if (cleanTeams.length < 2) return [];
+
+  const hasBye = cleanTeams.length % 2 !== 0;
+  if (hasBye) cleanTeams.push('BYE');
+
+  const participants = [...cleanTeams];
+  const totalRounds = participants.length - 1;
+  const half = participants.length / 2;
+  const matches = [];
+
+  for (let round = 0; round < totalRounds; round += 1) {
+    for (let index = 0; index < half; index += 1) {
+      const home = participants[index];
+      const away = participants[participants.length - 1 - index];
+      if (home === 'BYE' || away === 'BYE') continue;
+      matches.push({ home, away, round: round + 1 });
+    }
+
+    const fixed = participants[0];
+    const rotated = participants.slice(1);
+    rotated.unshift(rotated.pop());
+    participants.splice(0, participants.length, fixed, ...rotated);
   }
-  return pairs;
+
+  return matches;
+}
+
+function roundNameFromMatchCount(matchCount, fallbackIndex) {
+  if (matchCount === 1) return 'Final';
+  if (matchCount === 2) return 'Semifinals';
+  if (matchCount === 4) return 'Quarterfinals';
+  return `Round ${fallbackIndex + 1}`;
+}
+
+function buildCustomRounds(teams, roundCount, pairingMode) {
+  const parsedRoundCount = Number.parseInt(roundCount, 10);
+  if (!Number.isFinite(parsedRoundCount) || parsedRoundCount < 1) return null;
+
+  const expectedTeams = 2 ** parsedRoundCount;
+  if (!Array.isArray(teams) || teams.length < expectedTeams) return null;
+
+  const seededTeams = pairingMode === 'random'
+    ? shuffleTeams(teams).slice(0, expectedTeams)
+    : teams.slice(0, expectedTeams);
+
+  const firstRoundPairs = [];
+  for (let index = 0; index < expectedTeams / 2; index += 1) {
+    firstRoundPairs.push({
+      home: seededTeams[index],
+      away: seededTeams[expectedTeams - 1 - index]
+    });
+  }
+
+  const rounds = [];
+  for (let roundIndex = 0; roundIndex < parsedRoundCount; roundIndex += 1) {
+    const matchCount = expectedTeams / (2 ** (roundIndex + 1));
+    const name = roundNameFromMatchCount(matchCount, roundIndex);
+
+    if (roundIndex === 0) {
+      rounds.push({ name, matches: firstRoundPairs });
+      continue;
+    }
+
+    const previous = rounds[roundIndex - 1];
+    const matches = [];
+    for (let index = 0; index < matchCount; index += 1) {
+      matches.push({
+        home: `Winner ${previous.name} ${index * 2 + 1}`,
+        away: `Winner ${previous.name} ${index * 2 + 2}`
+      });
+    }
+    rounds.push({ name, matches });
+  }
+
+  return {
+    roundCount: parsedRoundCount,
+    teamCount: expectedTeams,
+    pairingMode,
+    rounds
+  };
+}
+
+function normalizeDraw(draw) {
+  if (Array.isArray(draw)) {
+    return { poolMatches: draw, customRounds: null };
+  }
+
+  if (!draw || typeof draw !== 'object') {
+    return { poolMatches: [], customRounds: null };
+  }
+
+  const poolMatches = Array.isArray(draw.poolMatches) ? draw.poolMatches : [];
+  const custom = draw.customRounds;
+  if (!custom || typeof custom !== 'object' || !Array.isArray(custom.rounds)) {
+    return { poolMatches, customRounds: null };
+  }
+
+  return {
+    poolMatches,
+    customRounds: {
+      roundCount: Number.parseInt(custom.roundCount, 10) || 0,
+      teamCount: Number.parseInt(custom.teamCount, 10) || 0,
+      pairingMode: custom.pairingMode === 'random' ? 'random' : 'sequential',
+      rounds: custom.rounds
+        .map((round) => ({
+          name: typeof round?.name === 'string' ? round.name : 'Round',
+          matches: Array.isArray(round?.matches) ? round.matches : []
+        }))
+    }
+  };
 }
 
 function sanitizeSportEntry(sport) {
@@ -93,7 +199,7 @@ function mergeSports(baseSports, userSports, teamMap, drawMap) {
       ...cleanSport,
       lookupKey,
       teams: dedupeTeamNames(teamMap[lookupKey]),
-      draw: Array.isArray(drawMap[lookupKey]) ? drawMap[lookupKey] : []
+      draw: normalizeDraw(drawMap[lookupKey])
     });
   });
 
@@ -109,7 +215,7 @@ function mergeSports(baseSports, userSports, teamMap, drawMap) {
       ...cleanSport,
       lookupKey,
       teams: dedupeTeamNames(teamMap[lookupKey]),
-      draw: Array.isArray(drawMap[lookupKey]) ? drawMap[lookupKey] : []
+      draw: normalizeDraw(drawMap[lookupKey])
     });
   });
 
@@ -172,7 +278,7 @@ function renderProgramme(programme) {
   `).join('')}`;
 }
 
-function renderSports({ sports, statusMessage = '' }) {
+function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
   const optionsHtml = sports.map((sport) => `
     <option value="${escapeHtml(sport.lookupKey)}">${escapeHtml(sport.code)}</option>
   `).join('');
@@ -213,9 +319,25 @@ function renderSports({ sports, statusMessage = '' }) {
       const teamsHtml = sport.teams.length === 0
         ? '<p class="small">No teams yet.</p>'
         : `<h3>Teams</h3><ul>${sport.teams.map((team) => `<li>${escapeHtml(team)}</li>`).join('')}</ul>`;
-      const drawHtml = sport.draw.length === 0
-        ? '<p class="small">No draw generated.</p>'
-        : `<h3>Draw</h3><ul>${sport.draw.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+
+      const poolHtml = sport.draw.poolMatches.length === 0
+        ? '<p class="small">No pool-play draw generated.</p>'
+        : `<h3>Pool Play (Round Robin)</h3><ul>${sport.draw.poolMatches.map((match, index) => `<li>Match ${index + 1}${match.round ? ` (Round ${match.round})` : ''}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+
+      const savedCustom = sport.draw.customRounds;
+      const previewCustom = previewCustomDraws[sport.lookupKey] || null;
+      const customHtml = savedCustom
+        ? `<h3>Saved Custom Rounds</h3>
+            <p class="small">${savedCustom.roundCount} round(s), ${savedCustom.teamCount} teams, pairing: ${savedCustom.pairingMode === 'random' ? 'Random draw' : 'Sequential top-vs-bottom'}.</p>
+            ${savedCustom.rounds.map((round) => `<h4>${escapeHtml(round.name)}</h4><ul>${round.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`).join('')}`
+        : '<p class="small">No custom rounds saved yet.</p>';
+
+      const previewHtml = previewCustom
+        ? `<h3>Preview (not saved yet)</h3>
+            <p class="small">Please review and click Save Custom Rounds.</p>
+            ${previewCustom.rounds.map((round) => `<h4>${escapeHtml(round.name)}</h4><ul>${round.matches.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`).join('')}`
+        : '<p class="small">No custom bracket preview generated.</p>';
+
       return `
         <section class="card">
           <h2>${escapeHtml(sport.code)}</h2>
@@ -223,16 +345,30 @@ function renderSports({ sports, statusMessage = '' }) {
           <p>${escapeHtml(sport.notes || '')}</p>
           ${teamsHtml}
           <div class="draw-controls">
-            <label for="drawMode-${escapeHtml(sport.lookupKey)}">Draw mode</label>
+            <label for="drawMode-${escapeHtml(sport.lookupKey)}">Pool draw mode</label>
             <select id="drawMode-${escapeHtml(sport.lookupKey)}" class="field-input draw-mode" data-sport-key="${escapeHtml(sport.lookupKey)}">
               <option value="listed">As listed</option>
               <option value="random">Random</option>
             </select>
-            <button type="button" class="button generate-draw-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Generate Draw</button>
+            <button type="button" class="button generate-draw-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Generate Pool Play</button>
             <button type="button" class="button clear-draw-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Clear Draw</button>
             <button type="button" class="button clear-sport-teams-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Clear Teams</button>
           </div>
-          ${drawHtml}
+          ${poolHtml}
+          <div class="draw-controls">
+            <h3>Custom Rounds</h3>
+            <label for="roundCount-${escapeHtml(sport.lookupKey)}">Number of custom rounds after pool play</label>
+            <input id="roundCount-${escapeHtml(sport.lookupKey)}" class="field-input custom-round-count" data-sport-key="${escapeHtml(sport.lookupKey)}" type="number" min="1" max="6" value="${savedCustom?.roundCount || 2}" />
+            <label for="customPairingMode-${escapeHtml(sport.lookupKey)}">Custom pairing style</label>
+            <select id="customPairingMode-${escapeHtml(sport.lookupKey)}" class="field-input custom-pairing-mode" data-sport-key="${escapeHtml(sport.lookupKey)}">
+              <option value="sequential" ${savedCustom?.pairingMode !== 'random' ? 'selected' : ''}>Sequential (top vs bottom)</option>
+              <option value="random" ${savedCustom?.pairingMode === 'random' ? 'selected' : ''}>Random draw</option>
+            </select>
+            <button type="button" class="button preview-custom-rounds-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Preview Custom Rounds</button>
+            <button type="button" class="button save-custom-rounds-btn" data-sport-key="${escapeHtml(sport.lookupKey)}">Save Custom Rounds</button>
+          </div>
+          ${previewHtml}
+          ${customHtml}
         </section>
       `;
     }).join('')}
@@ -241,6 +377,7 @@ function renderSports({ sports, statusMessage = '' }) {
 
 function setupSportsManager(baseSports) {
   let statusMessage = '';
+  let previewCustomDraws = {};
 
   const getState = () => {
     const importedSportTeams = storage.getImportedSportTeams();
@@ -252,7 +389,7 @@ function setupSportsManager(baseSports) {
     const sportDraws = storage.getSportDraws();
     const normalizedDraws = {};
     Object.entries(sportDraws || {}).forEach(([sportCode, draw]) => {
-      if (Array.isArray(draw)) normalizedDraws[sportLookupKey(sportCode)] = draw;
+      normalizedDraws[sportLookupKey(sportCode)] = normalizeDraw(draw);
     });
 
     const userSports = storage.getUserSports()
@@ -275,7 +412,7 @@ function setupSportsManager(baseSports) {
 
   const rerender = () => {
     const state = getState();
-    renderSports({ sports: state.sports, statusMessage });
+    renderSports({ sports: state.sports, statusMessage, previewCustomDraws });
     bindEvents();
   };
 
@@ -332,6 +469,7 @@ function setupSportsManager(baseSports) {
       const nextImported = { ...state.importedSportTeams, [sportSelection.lookupKey]: deduped };
       const nextDraws = { ...state.sportDraws };
       delete nextDraws[sportSelection.lookupKey];
+      delete previewCustomDraws[sportSelection.lookupKey];
 
       saveState({
         importedSportTeams: nextImported,
@@ -367,6 +505,7 @@ function setupSportsManager(baseSports) {
       const nextImported = { ...state.importedSportTeams, [sportSelection.lookupKey]: deduped };
       const nextDraws = { ...state.sportDraws };
       delete nextDraws[sportSelection.lookupKey];
+      delete previewCustomDraws[sportSelection.lookupKey];
 
       saveState({ importedSportTeams: nextImported, userSports: storage.getUserSports(), sportDraws: nextDraws });
       statusMessage = added
@@ -388,6 +527,7 @@ function setupSportsManager(baseSports) {
       const nextDraws = { ...state.sportDraws };
       delete nextImported[sportSelection.lookupKey];
       delete nextDraws[sportSelection.lookupKey];
+      delete previewCustomDraws[sportSelection.lookupKey];
 
       saveState({ importedSportTeams: nextImported, userSports: state.userSports, sportDraws: nextDraws });
       statusMessage = `Cleared teams and draw for ${sportSelection.displayLabel}.`;
@@ -398,6 +538,7 @@ function setupSportsManager(baseSports) {
       const confirmed = window.confirm('This clears imported teams, user-created sports, and generated draws for this feature only. Continue?');
       if (!confirmed) return;
 
+      previewCustomDraws = {};
       saveState({ importedSportTeams: {}, userSports: [], sportDraws: {} });
       statusMessage = 'Cleared all imported teams, user-created sports, and generated draws.';
       rerender();
@@ -411,18 +552,101 @@ function setupSportsManager(baseSports) {
         const state = getState();
         const sport = state.sports.find((item) => item.lookupKey === sportKey);
 
-        if (!sport || sport.teams.length === 0) {
-          statusMessage = 'No teams found for this sport. Add teams before generating a draw.';
+        if (!sport || sport.teams.length < 2) {
+          statusMessage = 'At least 2 teams are required before generating pool play.';
           rerender();
           return;
         }
 
         const sourceTeams = mode === 'random' ? shuffleTeams(sport.teams) : sport.teams;
-        const generated = pairTeams(sourceTeams);
-        const nextDraws = { ...state.sportDraws, [sportKey]: generated };
+        const generated = generateRoundRobinMatches(sourceTeams);
+        const nextDraws = {
+          ...state.sportDraws,
+          [sportKey]: {
+            poolMatches: generated,
+            customRounds: null
+          }
+        };
+
+        delete previewCustomDraws[sportKey];
+        saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
+        statusMessage = `Generated pool play for ${sport.code} (${mode === 'random' ? 'Random team order' : 'As listed'}).`;
+        rerender();
+      });
+    });
+
+    document.querySelectorAll('.preview-custom-rounds-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sportKey = sportLookupKey(button.dataset.sportKey);
+        const roundCountInput = document.querySelector(`.custom-round-count[data-sport-key="${sportKey}"]`);
+        const pairingInput = document.querySelector(`.custom-pairing-mode[data-sport-key="${sportKey}"]`);
+        const roundCount = Number.parseInt(roundCountInput?.value || '0', 10);
+        const pairingMode = pairingInput?.value === 'random' ? 'random' : 'sequential';
+
+        const state = getState();
+        const sport = state.sports.find((item) => item.lookupKey === sportKey);
+        if (!sport) return;
+
+        if (sport.draw.poolMatches.length === 0) {
+          statusMessage = `Generate pool play for ${sport.code} before creating custom rounds.`;
+          rerender();
+          return;
+        }
+
+        const expectedTeams = 2 ** roundCount;
+        if (roundCount < 1 || roundCount > 6) {
+          statusMessage = 'Choose between 1 and 6 custom rounds.';
+          rerender();
+          return;
+        }
+
+        if (sport.teams.length < expectedTeams) {
+          statusMessage = `${sport.code} needs at least ${expectedTeams} teams for ${roundCount} round(s).`;
+          rerender();
+          return;
+        }
+
+        const custom = buildCustomRounds(sport.teams, roundCount, pairingMode);
+        if (!custom) {
+          statusMessage = 'Could not generate the custom rounds. Check your inputs.';
+          rerender();
+          return;
+        }
+
+        previewCustomDraws = { ...previewCustomDraws, [sportKey]: custom };
+        statusMessage = `Preview ready for ${sport.code}. Review it, then click Save Custom Rounds.`;
+        rerender();
+      });
+    });
+
+    document.querySelectorAll('.save-custom-rounds-btn').forEach((button) => {
+      button.addEventListener('click', () => {
+        const sportKey = sportLookupKey(button.dataset.sportKey);
+        const preview = previewCustomDraws[sportKey];
+        const state = getState();
+        const sport = state.sports.find((item) => item.lookupKey === sportKey);
+        if (!sport) return;
+
+        if (!preview) {
+          statusMessage = `Generate a preview first for ${sport.code}.`;
+          rerender();
+          return;
+        }
+
+        const confirmed = window.confirm(`Save ${preview.roundCount} custom round(s) for ${sport.code}?`);
+        if (!confirmed) return;
+
+        const existing = normalizeDraw(state.sportDraws[sportKey]);
+        const nextDraws = {
+          ...state.sportDraws,
+          [sportKey]: {
+            poolMatches: existing.poolMatches,
+            customRounds: preview
+          }
+        };
 
         saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
-        statusMessage = `Generated draw for ${sport.code} (${mode === 'random' ? 'Random' : 'As listed'}).`;
+        statusMessage = `Saved custom rounds for ${sport.code}.`;
         rerender();
       });
     });
@@ -434,9 +658,10 @@ function setupSportsManager(baseSports) {
         const sport = state.sports.find((item) => item.lookupKey === sportKey);
         const nextDraws = { ...state.sportDraws };
         delete nextDraws[sportKey];
+        delete previewCustomDraws[sportKey];
 
         saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
-        statusMessage = `Cleared draw for ${sport?.code || 'selected sport'}.`;
+        statusMessage = `Cleared draw structure for ${sport?.code || 'selected sport'} while keeping imported teams.`;
         rerender();
       });
     });
@@ -451,6 +676,7 @@ function setupSportsManager(baseSports) {
         const nextDraws = { ...state.sportDraws };
         delete nextImported[sportKey];
         delete nextDraws[sportKey];
+        delete previewCustomDraws[sportKey];
 
         saveState({ importedSportTeams: nextImported, userSports: state.userSports, sportDraws: nextDraws });
         statusMessage = `Cleared teams for ${sport?.code || 'selected sport'}.`;
