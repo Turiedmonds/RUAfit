@@ -87,6 +87,16 @@ function generateRoundRobinMatches(teams) {
   return matches;
 }
 
+function getRoundRobinSummary(teamCount) {
+  if (!Number.isInteger(teamCount) || teamCount < 2) return null;
+
+  const rounds = teamCount - 1;
+  const matchesPerRound = Math.floor(teamCount / 2);
+  const totalMatches = (teamCount * (teamCount - 1)) / 2;
+
+  return { rounds, matchesPerRound, totalMatches };
+}
+
 function roundNameFromMatchCount(matchCount, fallbackIndex) {
   if (matchCount === 1) return 'Final';
   if (matchCount === 2) return 'Semifinals';
@@ -322,7 +332,14 @@ function renderSports({ sports, statusMessage = '', previewCustomDraws = {} }) {
 
       const poolHtml = sport.draw.poolMatches.length === 0
         ? '<p class="small">No pool-play draw generated.</p>'
-        : `<h3>Pool Play (Round Robin)</h3><ul>${sport.draw.poolMatches.map((match, index) => `<li>Match ${index + 1}${match.round ? ` (Round ${match.round})` : ''}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+        : (() => {
+          const summary = getRoundRobinSummary(sport.teams.length);
+          const summaryHtml = summary
+            ? `<p class="small">Auto-generated full round robin: ${summary.rounds} rounds × ${summary.matchesPerRound} matches per round = ${summary.totalMatches} total matches.</p>`
+            : '';
+
+          return `<h3>Pool Play (Round Robin)</h3>${summaryHtml}<ul>${sport.draw.poolMatches.map((match, index) => `<li>Match ${index + 1}${match.round ? ` (Round ${match.round})` : ''}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
+        })();
 
       const savedCustom = sport.draw.customRounds;
       const previewCustom = previewCustomDraws[sport.lookupKey] || null;
@@ -560,6 +577,7 @@ function setupSportsManager(baseSports) {
 
         const sourceTeams = mode === 'random' ? shuffleTeams(sport.teams) : sport.teams;
         const generated = generateRoundRobinMatches(sourceTeams);
+        const summary = getRoundRobinSummary(sport.teams.length);
         const nextDraws = {
           ...state.sportDraws,
           [sportKey]: {
@@ -570,7 +588,9 @@ function setupSportsManager(baseSports) {
 
         delete previewCustomDraws[sportKey];
         saveState({ importedSportTeams: state.importedSportTeams, userSports: state.userSports, sportDraws: nextDraws });
-        statusMessage = `Generated pool play for ${sport.code} (${mode === 'random' ? 'Random team order' : 'As listed'}).`;
+        statusMessage = summary
+          ? `Generated pool play for ${sport.code} (${mode === 'random' ? 'Random team order' : 'As listed'}): ${summary.rounds} rounds and ${summary.totalMatches} matches.`
+          : `Generated pool play for ${sport.code} (${mode === 'random' ? 'Random team order' : 'As listed'}).`;
         rerender();
       });
     });
