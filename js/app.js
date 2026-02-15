@@ -13,8 +13,13 @@ function escapeHtml(value = '') {
     .replaceAll("'", '&#39;');
 }
 
+function getDataBasePath() {
+  return window.location.pathname.startsWith('/RUAfit/') ? '/RUAfit/' : '/';
+}
+
 async function getJson(path) {
-  const response = await fetch(`${getBasePath()}src/data/${path}`);
+  const base = getDataBasePath();
+  const response = await fetch(`${base}data/${path}`);
   if (!response.ok) throw new Error(`Failed to load ${path}`);
   return response.json();
 }
