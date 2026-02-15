@@ -29,13 +29,14 @@ jobs:
           mkdir -p dist
           cp -r index.html offline.html 404.html programme.html sports.html venue.html gallery.html announcements.html contact.html dist/
           cp -r css js manifest.webmanifest service-worker.js dist/
-          cp -r src/data dist/src/
+          cp -r data dist/
 
       - name: Verify PWA export files
         run: |
           test -f dist/manifest.webmanifest
           test -f dist/service-worker.js
           test -f dist/index.html
+          test -f dist/data/event.json
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

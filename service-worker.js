@@ -18,11 +18,11 @@ const CORE_ASSETS = [
   `${BASE_PATH}js/router.js`,
   `${BASE_PATH}js/storage.js`,
   `${BASE_PATH}manifest.webmanifest`,
-  `${BASE_PATH}src/data/event.json`,
-  `${BASE_PATH}src/data/programme.json`,
-  `${BASE_PATH}src/data/sports.json`,
-  `${BASE_PATH}src/data/gallery.json`,
-  `${BASE_PATH}src/data/announcements.json`
+  `${BASE_PATH}data/event.json`,
+  `${BASE_PATH}data/programme.json`,
+  `${BASE_PATH}data/sports.json`,
+  `${BASE_PATH}data/gallery.json`,
+  `${BASE_PATH}data/announcements.json`
 ];
 
 self.addEventListener('install', (event) => {
