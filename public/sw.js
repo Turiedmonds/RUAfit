@@ -1,9 +1,9 @@
 const CACHE_NAME = 'ruafit-pwa-v1';
-const OFFLINE_URL = '/offline/';
+const OFFLINE_URL = './offline/';
 const CORE_ASSETS = [
-  '/',
-  '/offline/',
-  '/manifest.webmanifest'
+  './',
+  './offline/',
+  './manifest.webmanifest'
 ];
 
 self.addEventListener('install', (event) => {
