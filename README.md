@@ -1,48 +1,38 @@
-# 🏆 Event App Template
+# RUAfit Static PWA
 
-A simple, mobile-friendly event information app designed for sports events, school events, and community gatherings.  
-Organisers can update content by editing JSON files — no coding required.
+This repository now runs as a **framework-free static Progressive Web App** designed for GitHub Pages hosting.
 
----
+## Architecture
 
-## 🎯 Purpose
+- Multi-page HTML app (`*.html` at repo root)
+- ES module JavaScript in `/js`
+- Shared CSS in `/css/styles.css`
+- Web app manifest at `/manifest.webmanifest`
+- Service worker at `/service-worker.js`
+- JSON content files remain in `/src/data`
+- GitHub Pages workflow deploys static files only (no Next.js build)
 
-This template provides:
-- A reusable event website/app
-- Easy content updates via JSON files
-- Mobile-first design for all ages
-- Clear navigation for programme, venue, sports, and announcements
-- A structure that works for any event
+## Content Editing
 
----
+Event content still lives in `/src/data`:
 
-## 📁 Editable Content
+- `event.json`
+- `programme.json`
+- `sports.json`
+- `announcements.json`
+- `gallery.json`
 
-All event information lives in `/src/data/`.
+## Local Preview
 
-| File | Purpose |
-|------|---------|
-| `event.json` | Event name, dates, venue, contact |
-| `programme.json` | Daily schedule |
-| `sports.json` | Sport codes, draws, progressions |
-| `announcements.json` | Live updates |
-| `gallery.json` | Photo URLs |
+Use any static file server, for example:
 
-Organisers only edit these files.
+```bash
+python3 -m http.server 8080
+```
 
----
+Then open `http://localhost:8080`.
 
-## 🚀 Getting Started
+## GitHub Pages Deployment
 
-### 1. Install dependencies
-
-### 2. Deploy to GitHub Pages
-
-1. In GitHub, open **Settings → Pages**.
-2. Set **Source** to **GitHub Actions**.
-3. Push to `main` to trigger deployment.
-
-> **Note:** The GitHub Actions workflow currently uses `npm install` because this repository does not include a `package-lock.json` yet. Once a lockfile is added, we can switch back to `npm ci` for more repeatable builds.
-
-Your deployed site URL will be:
-`https://turiedmonds.github.io/RUAfit/`
+The workflow at `.github/workflows/pages.yml` packages and deploys static assets directly.
+No Node runtime is required after deployment.
