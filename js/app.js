@@ -75,7 +75,6 @@ function sanitizeSportEntry(sport) {
   return {
     code,
     location: typeof sport.location === 'string' ? sport.location : '',
-    drawUrl: typeof sport.drawUrl === 'string' ? sport.drawUrl : '',
     notes: typeof sport.notes === 'string' ? sport.notes : ''
   };
 }
@@ -217,16 +216,11 @@ function renderSports({ sports, statusMessage = '' }) {
       const drawHtml = sport.draw.length === 0
         ? '<p class="small">No draw generated.</p>'
         : `<h3>Draw</h3><ul>${sport.draw.map((match, index) => `<li>Match ${index + 1}: ${escapeHtml(match.home)} vs ${escapeHtml(match.away)}</li>`).join('')}</ul>`;
-      const drawLink = sport.drawUrl
-        ? `<a href="${escapeHtml(sport.drawUrl)}" target="_blank" rel="noreferrer">View draw link</a>`
-        : '';
-
       return `
         <section class="card">
           <h2>${escapeHtml(sport.code)}</h2>
           <p>Location: ${escapeHtml(sport.location || '')}</p>
           <p>${escapeHtml(sport.notes || '')}</p>
-          ${drawLink}
           ${teamsHtml}
           <div class="draw-controls">
             <label for="drawMode-${escapeHtml(sport.lookupKey)}">Draw mode</label>
@@ -297,7 +291,7 @@ function setupSportsManager(baseSports) {
         return { lookupKey: typedSportKey, displayLabel: existingSport.code, createdNewSport: false };
       }
 
-      const nextUserSports = [...state.userSports, { code: typedSportLabel, location: '', drawUrl: '', notes: '' }];
+      const nextUserSports = [...state.userSports, { code: typedSportLabel, location: '', notes: '' }];
       storage.setUserSports(nextUserSports);
       return { lookupKey: typedSportKey, displayLabel: typedSportLabel, createdNewSport: true };
     }
